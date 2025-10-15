@@ -170,7 +170,7 @@ function initMap() {
 
         satelliteLayer = new AMap.TileLayer.Satellite();
         roadNetLayer = new AMap.TileLayer.RoadNet();
-        map.value.add([satelliteLayer, roadNetLayer]);
+        map.value.add([satelliteLayer, ]);
         satelliteLayer.hide();
         roadNetLayer.hide();
 
@@ -384,7 +384,10 @@ function deleteFeature(featureId) {
     const index = features.value.findIndex(f => f.id === featureId);
     if (index === -1) return;
 
-    drawingLayer.removeOverlay(features.value[index].graphic);
+    if (features.value[index] && features.value[index].graphic) {
+      map.value.remove(features.value[index].graphic);
+    }
+
     features.value.splice(index, 1);
 
     if (selectedFeature.value?.id === featureId) selectedFeature.value = null;
@@ -501,7 +504,15 @@ function handleFileImport(event) {
     const reader = new FileReader();
     reader.onload = (e) => {
         try {
-            const data = XLSX.utils.sheet_to_json(XLSX.read(e.target.result, { type: 'binary' }).Sheets['Sheet1']);
+            // 1. 读取整个Excel文件
+            const workbook = XLSX.read(e.target.result, { type: 'binary' });
+            // 2. 获取第一个工作表的名称 (不再写死为 'Sheet1')
+            const firstSheetName = workbook.SheetNames[0];
+            if (!firstSheetName) {
+                throw new Error('Excel文件中没有找到任何工作表');
+            }
+            // 3. 使用获取到的名称来解析工作表数据
+            const data = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName]);
             const parsedFeatures = parseDataToFeatures(data);
             if (parsedFeatures.length === 0) throw new Error('未找到有效数据');
             parsedFeatures.forEach(addFeature);
@@ -511,7 +522,7 @@ function handleFileImport(event) {
             showToast(`文件导入失败: ${error.message}`, 'error');
         } finally {
             isLoading.value = false;
-            event.target.value = '';
+            event.target.value = ''; 
         }
     };
     reader.readAsBinaryString(file);

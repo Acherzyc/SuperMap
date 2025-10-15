@@ -19,72 +19,21 @@
     <div class="main-container">
       <div id="map-viewer" class="map-viewer"></div>
       
-      <div class="bottom-panel-backdrop" :class="{ 'is-visible': isMobilePanelOpen }" @click="closeMobilePanel"></div>
-
-      <div class="side-panel" :class="{ 'collapsed': isDesktopPanelCollapsed, 'is-open': isMobilePanelOpen }">
-        <div class="panel-toggle" @click="isDesktopPanelCollapsed = !isDesktopPanelCollapsed">
-          <svg width="20" height="20" viewBox="0 0 24 24" :style="{ transform: isDesktopPanelCollapsed ? 'rotate(180deg)' : 'rotate(0)' }"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-
-        <div class="panel-header">
-           <div class="panel-grabber"></div>
-           <div class="panel-header-top-row">
-            <div class="panel-title"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M9 12L11 14L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/></svg>数据列表</div>
-             <button class="panel-close-btn-mobile" title="关闭面板" @click="closeMobilePanel">
-              <svg width="20" height="20" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-           </div>
-          <div class="search-box">
-            <input type="text" class="search-input" v-model="searchTerm" placeholder="搜索要素名称...">
-          </div>
-          <div class="filter-group">
-            <button class="filter-btn" :class="{ active: activeFilter === 'all' }" @click="activeFilter = 'all'">全部</button>
-            <button class="filter-btn" :class="{ active: activeFilter === 'point' }" @click="activeFilter = 'point'">点</button>
-            <button class="filter-btn" :class="{ active: activeFilter === 'polyline' }" @click="activeFilter = 'polyline'">线</button>
-            <button class="filter-btn" :class="{ active: activeFilter === 'polygon' }" @click="activeFilter = 'polygon'">面</button>
-          </div>
-        </div>
-
-        <div class="data-list">
-          <div v-if="!filteredFeatures.length" class="empty-state">
-            <svg width="64" height="64" viewBox="0 0 24 24"><path d="M21 10C21 17 12 23 12 23C12 23 3 17 3 10C3 5.58172 6.58172 2 11 2C15.4183 2 19 5.58172 19 10C19 10.5523 19.4477 11 20 11C20.5523 11 21 10.5523 21 10Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="2"/></svg>
-            <h3>未找到匹配的要素</h3>
-            <p>尝试修改筛选或搜索条件</p>
-          </div>
-          <div v-for="feature in filteredFeatures" :key="feature.id"
-            class="data-item"
-            :class="{ selected: selectedFeature && selectedFeature.id === feature.id, expanded: selectedFeature && selectedFeature.id === feature.id }"
-            @click="selectFeatureById(feature.id)"
-          >
-            <div class="data-item-header">
-              <div class="data-item-header-content">
-                <span class="data-item-name">{{ feature.properties.name || '(未命名)' }}</span>
-                <span class="data-item-type" :class="feature.type">
-                  {{ { point: '点', polyline: '线', polygon: '面' }[feature.type] }}
-                </span>
-              </div>
-              <div class="data-item-actions">
-                 <button class="action-btn" title="定位" @click.stop="zoomToFeature(feature.id)"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
-              </div>
-            </div>
-            <div class="data-item-details">
-               <div class="data-item-card">
-                 <h4>属性信息</h4>
-                 <table class="info-table-display">
-                   <tbody>
-                     <tr v-for="(value, key) in feature.properties" :key="key">
-                       <td>{{ key }}</td>
-                       <td>{{ value }}</td>
-                     </tr>
-                   </tbody>
-                 </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <div class="bottom-panel-backdrop" :class="{ 'is-visible': panelState.isMobilePanelOpen }" @click="panelActions.closeMobilePanel"></div>
       
-      <button id="mobilePanelToggle" class="mobile-panel-toggle-btn" title="显示/隐藏数据面板" @click="isMobilePanelOpen = !isMobilePanelOpen">
+      <SidePanel
+        :features="allFeatures"
+        :selected-feature-id="selectedFeatureId"
+        :is-panel-collapsed="panelState.isDesktopPanelCollapsed"
+        :is-mobile-panel-open="panelState.isMobilePanelOpen"
+        :readonly="true" 
+        @toggle-desktop-panel="panelActions.toggleDesktopPanel"
+        @close-mobile-panel="panelActions.closeMobilePanel"
+        @feature-selected="selectFeatureById"
+        @zoom-to-feature="zoomToFeature"
+      />
+      
+      <button id="mobilePanelToggle" class="mobile-panel-toggle-btn" title="显示/隐藏数据面板" @click="panelActions.toggleMobilePanel">
         <svg width="24" height="24" viewBox="0 0 24 24"><path d="M8 6H21M8 12H21M8 18H21M3 6H3.01M3 12H3.01M3 18H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </div>
@@ -95,11 +44,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, computed } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useSupabaseClient } from '#imports';
-import ToastNotification from '~/components/ToastNotification.vue';
-import LoadingIndicator from '~/components/LoadingIndicator.vue';
+import ToastNotification from '~/components/ToastNotification.vue'; //
+import LoadingIndicator from '~/components/LoadingIndicator.vue'; //
+import SidePanel from '~/components/SidePanel.vue'; //
 /* global AMap, html2canvas */
 
 const route = useRoute();
@@ -109,47 +59,51 @@ const loading = ref(true);
 const toast = reactive({ message: '', type: 'info', visible: false });
 
 const allFeatures = ref([]);
-const selectedFeature = ref(null);
+const selectedFeatureId = ref(null);
 const labelsVisible = ref(true);
 const isSatelliteVisible = ref(false);
-let satelliteLayer = null;
-let roadNetLayer = null;
-let drawingLayer = null;
+let satelliteLayer, roadNetLayer, drawingLayer;
 
-const searchTerm = ref('');
-const activeFilter = ref('all');
-const isDesktopPanelCollapsed = ref(false);
-const isMobilePanelOpen = ref(false);
-
-const filteredFeatures = computed(() => {
-  let items = allFeatures.value;
-  if (activeFilter.value !== 'all') {
-    items = items.filter(f => f.type === activeFilter.value);
-  }
-  if (searchTerm.value.trim()) {
-    const lowerCaseSearch = searchTerm.value.toLowerCase();
-    items = items.filter(f => {
-      const name = f.properties.name || '';
-      return name.toLowerCase().includes(lowerCaseSearch);
-    });
-  }
-  return items;
-});
-
-watch(labelsVisible, () => {
-  allFeatures.value.forEach(feature => {
-    if (feature.type === 'point' && feature.graphic) {
-      feature.graphic.setContent(createMarkerContent(feature));
+// --- Responsive Panel Logic (copied from working index.vue) ---
+function useResponsivePanel(selectedIdRef) {
+  const isMobileView = ref(window.innerWidth <= 768);
+  const panelState = reactive({ isDesktopPanelCollapsed: false, isMobilePanelOpen: false });
+  const handleResize = () => { isMobileView.value = window.innerWidth <= 768; };
+  onMounted(() => window.addEventListener('resize', handleResize));
+  onBeforeUnmount(() => window.removeEventListener('resize', handleResize));
+  const panelActions = {
+    openPanelForSelection() {
+      if (isMobileView.value) panelState.isMobilePanelOpen = true;
+      else panelState.isDesktopPanelCollapsed = false;
+    },
+    toggleDesktopPanel() { panelState.isDesktopPanelCollapsed = !panelState.isDesktopPanelCollapsed; },
+    toggleMobilePanel() {
+        panelState.isMobilePanelOpen = !panelState.isMobilePanelOpen;
+        if (!panelState.isMobilePanelOpen) selectedIdRef.value = null;
+    },
+    closeMobilePanel() {
+        panelState.isMobilePanelOpen = false;
+        selectedIdRef.value = null;
+    },
+    deselectAndClose() {
+        selectedIdRef.value = null;
+        if (isMobileView.value) panelState.isMobilePanelOpen = false;
     }
-  });
-});
+  };
+  return { panelState, panelActions };
+}
+
+const { panelState, panelActions } = useResponsivePanel(selectedFeatureId);
 
 onMounted(() => {
   const shareId = route.params.id;
+  // **修正点 1：处理无效链接**
   if (!shareId) {
     loading.value = false;
+    showToast("无效的分享链接", "error");
     return;
   }
+  
   const checkAMap = setInterval(() => {
     if (window.AMap && typeof window.AMap.Map === 'function') {
       clearInterval(checkAMap);
@@ -158,14 +112,25 @@ onMounted(() => {
   }, 100);
 });
 
+// **修正点 2：增强数据加载的错误处理**
 async function loadMapData(shareId) {
   try {
-    const { data } = await supabase.from('shared_maps').select('map_data').eq('id', shareId).single();
-    if (!data || !data.map_data) throw new Error("未找到地图数据。");
+    const { data, error } = await supabase.from('shared_maps').select('map_data').eq('id', shareId).single();
+    
+    // 明确处理从 Supabase 返回的错误
+    if (error) throw error;
+
+    // 明确处理找不到数据的情况
+    if (!data || !data.map_data) {
+        throw new Error("分享的地图数据不存在或已被删除。");
+    }
+    
     initMap(data.map_data);
   } catch (e) {
-    // silent fail
+    // 捕获任何错误并告知用户
+    showToast(`加载失败: ${e.message}`, 'error');
   } finally {
+    // 无论成功或失败，最后都必须隐藏加载动画
     loading.value = false;
   }
 }
@@ -180,11 +145,9 @@ function initMap(mapData) {
     crossOrigin: 'anonymous'
   });
 
-  map.value.on('click', () => { 
-    if(selectedFeature.value) {
-      selectedFeature.value = null;
-    }
-   });
+  map.value.on('click', (e) => { 
+    if (!e.target?.getExtData?.().id) panelActions.deselectAndClose();
+  });
 
   map.value.on('complete', () => {
     drawingLayer = new AMap.OverlayGroup();
@@ -192,7 +155,7 @@ function initMap(mapData) {
 
     satelliteLayer = new AMap.TileLayer.Satellite();
     roadNetLayer = new AMap.TileLayer.RoadNet();
-    map.value.add([satelliteLayer, ]);
+    map.value.add([satelliteLayer, roadNetLayer]);
     satelliteLayer.hide();
     roadNetLayer.hide();
 
@@ -215,7 +178,7 @@ function addFeatureToMap(feature) {
     if (graphic) {
         graphic.on('click', (e) => {
             selectFeatureById(e.target.getExtData().id);
-            // 【关键修正】: 移除 e.stopPropagation()
+            e.stopPropagation();
         });
         feature.graphic = graphic;
         allFeatures.value.push(feature);
@@ -224,38 +187,26 @@ function addFeatureToMap(feature) {
 }
 
 function selectFeatureById(featureId) {
-    if (!featureId) {
-        selectedFeature.value = null;
-        return;
-    }
-    // Toggle selection
-    if(selectedFeature.value && selectedFeature.value.id === featureId) {
-      selectedFeature.value = null;
+    if (!featureId || selectedFeatureId.value === featureId) {
+        panelActions.deselectAndClose();
     } else {
-      selectedFeature.value = allFeatures.value.find(f => f.id === featureId);
-    }
-
-    if (window.innerWidth <= 768 && selectedFeature.value) {
-      isMobilePanelOpen.value = true;
+        selectedFeatureId.value = featureId;
+        panelActions.openPanelForSelection();
     }
 }
 
 function zoomToFeature(featureId) {
     const feature = allFeatures.value.find(f => f.id === featureId);
     if (!feature) return;
-    selectFeatureById(feature.id);
+    selectFeatureById(featureId);
     if (feature.type === 'point') {
         map.value.setZoomAndCenter(16, feature.geometry.coordinates);
     } else {
         map.value.setFitView([feature.graphic], false, [60, 60, 60, 60]);
     }
     if (window.innerWidth <= 768) {
-      isMobilePanelOpen.value = false;
+      panelActions.closeMobilePanel();
     }
-}
-
-function closeMobilePanel() {
-  isMobilePanelOpen.value = false;
 }
 
 function toggleMapStyle() {
@@ -267,6 +218,11 @@ function toggleMapStyle() {
 
 function toggleLabels() {
   labelsVisible.value = !labelsVisible.value;
+    allFeatures.value.forEach(feature => {
+    if (feature.type === 'point' && feature.graphic) {
+      feature.graphic.setContent(createMarkerContent(feature));
+    }
+  });
   showToast(labelsVisible.value ? '已显示标签' : '已隐藏标签', 'success');
 }
 
@@ -314,7 +270,7 @@ function createMarkerContent(feature) {
 
 <style>
 /* 导入您项目中的全局样式 */
-@import '~/assets/css/main.css';
+@import '~/assets/css/main.css'; /* */
 
 /* 页面特定样式 */
 .share-page-wrapper {
@@ -335,15 +291,5 @@ function createMarkerContent(feature) {
 }
 .info-table-display td:first-child {
   font-weight: 500; color: #666; width: 35%;
-}
-
-/* 覆盖 side-panel 默认的 margin-right 动画, 使用 transform */
-.side-panel {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-@media (min-width: 769px) {
-  .side-panel.collapsed {
-    transform: translateX(100%);
-  }
 }
 </style>

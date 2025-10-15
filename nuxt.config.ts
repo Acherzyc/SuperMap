@@ -54,7 +54,7 @@ export default defineNuxtConfig({
     redirectOptions: {
       login: '/login', // 未认证用户将被重定向到此页面
       callback: '/confirm', // Supabase 认证回调页面
-      exclude: ['/register'], // 不需要认证即可访问的页面
+      exclude: ['/register', '/share/**'], // 不需要认证即可访问的页面
     },
     cookieOptions: {
       maxAge: 60 * 60 * 24 * 7, // 7天

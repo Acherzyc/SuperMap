@@ -40,17 +40,18 @@
         <h3>暂无数据</h3>
         <p>开始绘制或导入数据来创建地图要素</p>
       </div>
-      <div v-else-if="!filteredFeatures.length" class="empty-state">
+      <div v-else-if="!orderedFeatures.length" class="empty-state">
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 10C21 17 12 23 12 23C12 23 3 17 3 10C3 5.58172 6.58172 2 11 2C15.4183 2 19 5.58172 19 10C19 10.5523 19.4477 11 20 11C20.5523 11 21 10.5523 21 10Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="2"/></svg>
         <h3>未找到匹配的要素</h3>
         <p>尝试修改筛选或搜索条件</p>
       </div>
       <DataItem
-        v-for="feature in filteredFeatures"
+        v-for="feature in orderedFeatures"
         :key="feature.id"
         :data-id="feature.id"
         :feature="feature"
         :is-selected="feature.id === selectedFeatureId"
+        :readonly="readonly"
         @select-feature="$emit('featureSelected', feature.id)"
         @delete-feature="$emit('featureDeleted', feature.id)"
         @zoom-to-feature="$emit('zoomToFeature', feature.id)"
@@ -69,7 +70,11 @@ const props = defineProps({
   features: Array,
   selectedFeatureId: String,
   isPanelCollapsed: Boolean,
-  isMobilePanelOpen: Boolean
+  isMobilePanelOpen: Boolean,
+  readonly: {
+    type: Boolean,
+    default: false
+  }
 });
 
 const emit = defineEmits([
@@ -81,7 +86,6 @@ const searchTerm = ref('');
 const activeFilter = ref('all');
 const sidePanelRef = ref(null);
 
-// **OPTIMIZATION 2: Auto-scroll to selected item**
 watch(() => props.selectedFeatureId, (newId) => {
   if (newId) {
     nextTick(() => {
@@ -91,26 +95,35 @@ watch(() => props.selectedFeatureId, (newId) => {
   }
 });
 
-const filteredFeatures = computed(() => {
-  let items = props.features;
-  if (activeFilter.value !== 'all') {
-    items = items.filter(f => f.type === activeFilter.value);
+// **优化点：实现选中项置顶和过滤逻辑**
+const orderedFeatures = computed(() => {
+  // 1. 过滤
+  let items = props.features.filter(f => {
+    const filterMatch = activeFilter.value === 'all' || f.type === activeFilter.value;
+    const searchMatch = !searchTerm.value.trim() || 
+                        (f.properties.name || f.properties['项目名称'] || '')
+                        .toLowerCase().includes(searchTerm.value.toLowerCase());
+    return filterMatch && searchMatch;
+  });
+
+  // 2. 置顶
+  if (props.selectedFeatureId) {
+    const selected = items.find(f => f.id === props.selectedFeatureId);
+    if (selected) {
+      items = items.filter(f => f.id !== props.selectedFeatureId);
+      items.unshift(selected); // 将选中项移动到数组开头
+    }
   }
-  if (searchTerm.value.trim()) {
-    const lowerCaseSearch = searchTerm.value.toLowerCase();
-    items = items.filter(f => {
-      const name = f.properties.name || f.properties['项目名称'] || '';
-      return name.toLowerCase().includes(lowerCaseSearch);
-    });
-  }
+  
   return items;
 });
 
-// **OPTIMIZATION 3: Mobile panel drag logic**
+
+// 移动端面板拖拽逻辑 (保持不变)
 const isDragging = ref(false);
 const startY = ref(0);
 const startHeight = ref(0);
-const panelHeight = ref(66); // Initial height in vh
+const panelHeight = ref(66);
 
 const mobilePanelStyle = computed(() => {
   if (typeof window === 'undefined' || window.innerWidth > 768) {
@@ -123,33 +136,30 @@ const mobilePanelStyle = computed(() => {
 });
 
 function handleTouchStart(e) {
-  if (window.innerWidth > 768) return;
+  if (window.innerWidth > 768 || props.readonly) return;
   isDragging.value = true;
   startY.value = e.touches[0].clientY;
   startHeight.value = sidePanelRef.value.offsetHeight;
 }
 
 function handleTouchMove(e) {
-  if (!isDragging.value || window.innerWidth > 768) return;
+  if (!isDragging.value || window.innerWidth > 768 || props.readonly) return;
   const currentY = e.touches[0].clientY;
   const deltaY = startY.value - currentY;
   const newHeight = startHeight.value + deltaY;
   
-  // Convert new height to vh and clamp between 20vh and 90vh
   const newVh = (newHeight / window.innerHeight) * 100;
   panelHeight.value = Math.max(20, Math.min(90, newVh));
 }
 
-function handleTouchEnd(e) {
-  if (!isDragging.value) return;
+function handleTouchEnd() {
+  if (!isDragging.value || props.readonly) return;
   isDragging.value = false;
 
-  // If dragged down significantly, close the panel
   if (panelHeight.value < 40) {
     emit('closeMobilePanel');
-    panelHeight.value = 66; // Reset for next open
+    panelHeight.value = 66;
   } else {
-    // Snap to a more reasonable height
     panelHeight.value = 66;
   }
 }
