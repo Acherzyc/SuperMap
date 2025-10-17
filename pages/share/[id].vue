@@ -18,7 +18,14 @@
     
     <div class="main-container">
       <div id="map-viewer" class="map-viewer"></div>
-      
+
+      <div id="map-search-container">
+        <div class="search-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2.5"/><path d="M21 21L16.65 16.65" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <input type="text" id="search-input" placeholder="搜索地点...">
+        <div id="search-results-panel"></div>
+      </div>
       <div class="bottom-panel-backdrop" :class="{ 'is-visible': panelState.isMobilePanelOpen }" @click="panelActions.closeMobilePanel"></div>
       
       <SidePanel
@@ -44,12 +51,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import { useSupabaseClient } from '#imports';
-import ToastNotification from '~/components/ToastNotification.vue'; //
-import LoadingIndicator from '~/components/LoadingIndicator.vue'; //
-import SidePanel from '~/components/SidePanel.vue'; //
+import ToastNotification from '~/components/ToastNotification.vue';
+import LoadingIndicator from '~/components/LoadingIndicator.vue';
+import SidePanel from '~/components/SidePanel.vue';
 /* global AMap, html2canvas */
 
 const route = useRoute();
@@ -62,9 +69,9 @@ const allFeatures = ref([]);
 const selectedFeatureId = ref(null);
 const labelsVisible = ref(true);
 const isSatelliteVisible = ref(false);
-let satelliteLayer, roadNetLayer, drawingLayer;
+let satelliteLayer, roadNetLayer, drawingLayer, placeSearch;
 
-// --- Responsive Panel Logic (copied from working index.vue) ---
+// --- Responsive Panel Logic ---
 function useResponsivePanel(selectedIdRef) {
   const isMobileView = ref(window.innerWidth <= 768);
   const panelState = reactive({ isDesktopPanelCollapsed: false, isMobilePanelOpen: false });
@@ -97,7 +104,6 @@ const { panelState, panelActions } = useResponsivePanel(selectedFeatureId);
 
 onMounted(() => {
   const shareId = route.params.id;
-  // **修正点 1：处理无效链接**
   if (!shareId) {
     loading.value = false;
     showToast("无效的分享链接", "error");
@@ -105,32 +111,25 @@ onMounted(() => {
   }
   
   const checkAMap = setInterval(() => {
-    if (window.AMap && typeof window.AMap.Map === 'function') {
+    if (window.AMap && typeof window.AMap.Map === 'function' && typeof window.AMap.PlaceSearch === 'function') {
       clearInterval(checkAMap);
       loadMapData(shareId);
     }
   }, 100);
 });
 
-// **修正点 2：增强数据加载的错误处理**
 async function loadMapData(shareId) {
   try {
     const { data, error } = await supabase.from('shared_maps').select('map_data').eq('id', shareId).single();
-    
-    // 明确处理从 Supabase 返回的错误
     if (error) throw error;
-
-    // 明确处理找不到数据的情况
     if (!data || !data.map_data) {
         throw new Error("分享的地图数据不存在或已被删除。");
     }
-    
     initMap(data.map_data);
+    initSearch(); // <-- 新增: 初始化搜索
   } catch (e) {
-    // 捕获任何错误并告知用户
     showToast(`加载失败: ${e.message}`, 'error');
   } finally {
-    // 无论成功或失败，最后都必须隐藏加载动画
     loading.value = false;
   }
 }
@@ -164,6 +163,36 @@ function initMap(mapData) {
     if (allFeatures.value.length > 0) map.value.setFitView(null, false, [60, 60, 420, 60]);
   });
 }
+
+function initSearch() {
+    const searchInput = document.getElementById('search-input');
+    const searchResultsPanel = document.getElementById('search-results-panel');
+
+    const autoComplete = new AMap.AutoComplete({
+        input: searchInput,
+        panel: searchResultsPanel,
+        city: '全国'
+    });
+
+    placeSearch = new AMap.PlaceSearch({
+        map: map.value,
+        panel: searchResultsPanel,
+        autoFitView: true
+    });
+
+    autoComplete.on('select', (e) => {
+        placeSearch.setCity(e.poi.adcode);
+        placeSearch.search(e.poi.name, (status, result) => {
+            if (status === 'complete' && result.info === 'OK') {
+                if (result.poiList.pois.length > 0) {
+                    map.value.setZoomAndCenter(15, result.poiList.pois[0].location);
+                }
+            }
+        });
+        searchInput.value = '';
+    });
+}
+
 
 function addFeatureToMap(feature) {
     let graphic;
@@ -229,7 +258,7 @@ function toggleLabels() {
 async function exportAsImage() {
   if (typeof html2canvas === 'undefined') return;
   loading.value = true;
-  const selectors = ['.header', '.side-panel', '.amap-logo', '.amap-copyright', '#mobilePanelToggle'];
+  const selectors = ['.header', '.side-panel', '.amap-logo', '.amap-copyright', '#mobilePanelToggle', '#map-search-container'];
   selectors.forEach(s => {
       const el = document.querySelector(s);
       if (el) el.style.visibility = 'hidden';
@@ -270,7 +299,7 @@ function createMarkerContent(feature) {
 
 <style>
 /* 导入您项目中的全局样式 */
-@import '~/assets/css/main.css'; /* */
+@import '~/assets/css/main.css';
 
 /* 页面特定样式 */
 .share-page-wrapper {

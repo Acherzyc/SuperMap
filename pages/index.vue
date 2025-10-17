@@ -6,9 +6,7 @@
       @import-file="handleFileImport"
       @export-excel="exportToExcel"
       @open-cloud-panel="isCloudPanelVisible = true"
-
       @generate-share-link="shareToCloud"
-
       @toggle-map-style="toggleMapStyle"
       @save-image="exportAsImage"
       @clear-all="clearAll"
@@ -18,6 +16,13 @@
     <div class="main-container">
       <div id="map" :class="{ 'drawing-mode': isDrawingMode }"></div>
 
+      <div id="map-search-container">
+        <div class="search-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2.5"/><path d="M21 21L16.65 16.65" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <input type="text" id="search-input" placeholder="搜索地点...">
+        <div id="search-results-panel"></div>
+      </div>
       <DrawingToolbar
         v-if="isDrawing && (currentTool === 'polyline' || currentTool === 'polygon')"
         @finish-drawing="finishDrawing"
@@ -92,6 +97,9 @@ const isMobilePanelOpen = ref(false);
 let featureIdCounter = 1;
 let rangingTool = null;
 let isSatelliteVisible = ref(false);
+let placeSearch = null;
+let districtSearch = null; // <-- 新增: 行政区搜索实例
+let currentSearchPolygon = null; // <-- 新增: 用于存储当前显示的搜索多边形
 
 // Map Layers
 let satelliteLayer = null;
@@ -127,7 +135,7 @@ const drawTipText = computed(() => {
 // --- LIFECYCLE HOOK ---
 onMounted(() => {
   const checkAMap = setInterval(() => {
-    if (window.AMap && typeof window.AMap.Map === 'function') {
+    if (window.AMap && typeof window.AMap.Map === 'function' && typeof window.AMap.PlaceSearch === 'function' && typeof window.AMap.DistrictSearch === 'function') {
       clearInterval(checkAMap);
       init();
     }
@@ -144,6 +152,7 @@ onBeforeUnmount(() => {
 async function init() {
   try {
     await initMap();
+    initSearch(); // <-- 已更新
     bindGlobalEvents();
     showToast('系统初始化完成', 'success');
   } catch (error) {
@@ -170,7 +179,7 @@ function initMap() {
 
         satelliteLayer = new AMap.TileLayer.Satellite();
         roadNetLayer = new AMap.TileLayer.RoadNet();
-        map.value.add([satelliteLayer, ]);
+        map.value.add([satelliteLayer, roadNetLayer]);
         satelliteLayer.hide();
         roadNetLayer.hide();
 
@@ -194,6 +203,68 @@ function initMap() {
     }
   });
 }
+
+// --- 搜索逻辑更新 ---
+function initSearch() {
+    const searchInput = document.getElementById('search-input');
+    const searchResultsPanel = document.getElementById('search-results-panel');
+
+    const autoComplete = new AMap.AutoComplete({
+        input: searchInput,
+        panel: searchResultsPanel,
+        city: '全国'
+    });
+
+    placeSearch = new AMap.PlaceSearch({ map: map.value });
+
+    districtSearch = new AMap.DistrictSearch({
+        subdistrict: 0,
+        extensions: 'all',
+        level: 'district'
+    });
+
+    autoComplete.on('select', (e) => {
+        // 清除上一次的搜索结果（无论是面还是点）
+        placeSearch.clear();
+        if (currentSearchPolygon) {
+            map.value.remove(currentSearchPolygon);
+            currentSearchPolygon = null;
+        }
+
+        const keyword = e.poi.name;
+        
+        // 优先尝试行政区划搜索
+        districtSearch.search(keyword, (status, result) => {
+            if (status === 'complete' && result.info === 'OK' && result.districtList.length > 0) {
+                const districtData = result.districtList[0];
+                if (districtData.boundaries) {
+                    // 如果有边界信息，则绘制面
+                    const bounds = districtData.boundaries;
+                    const polygon = new AMap.Polygon({
+                        path: bounds,
+                        strokeWeight: 2,
+                        strokeColor: '#00D3FC',
+                        fillColor: '#00D3FC',
+                        fillOpacity: 0.2
+                    });
+                    map.value.add(polygon);
+                    map.value.setFitView([polygon]);
+                    currentSearchPolygon = polygon; // 保存当前多边形
+                } else {
+                    // 没有边界信息，回退到地点搜索
+                    placeSearch.search(keyword);
+                }
+            } else {
+                // 行政区划搜索失败，回退到地点搜索
+                placeSearch.search(keyword);
+            }
+        });
+
+        searchInput.value = ''; // 清空输入框
+        searchResultsPanel.style.display = 'none'; // 隐藏建议面板
+    });
+}
+
 
 function bindGlobalEvents() {
     document.addEventListener('keydown', handleGlobalKeyDown);
@@ -235,6 +306,13 @@ function handleMapClick(e) {
       return;
     }
     if (currentTool.value === 'ranging') return;
+
+    // 点击地图时清除搜索结果
+    placeSearch.clear();
+    if (currentSearchPolygon) {
+        map.value.remove(currentSearchPolygon);
+        currentSearchPolygon = null;
+    }
 
     const point = [e.lnglat.getLng(), e.lnglat.getLat()];
     if (currentTool.value === 'point') addPoint(point);
@@ -624,7 +702,7 @@ async function shareToCloud() {
 async function exportAsImage() {
     if (typeof html2canvas === 'undefined') return showToast('导出库加载失败', 'error');
     isLoading.value = true;
-    const elementsToHide = ['.header', '.side-panel', '.coordinates', '.draw-tip', '.amap-logo', '.amap-copyright', '#mobilePanelToggle', '.drawing-toolbar'];
+    const elementsToHide = ['.header', '.side-panel', '.coordinates', '.draw-tip', '.amap-logo', '.amap-copyright', '#mobilePanelToggle', '.drawing-toolbar', '#map-search-container'];
     elementsToHide.forEach(sel => {
         const el = document.querySelector(sel);
         if (el) el.style.visibility = 'hidden';
@@ -705,12 +783,6 @@ function downloadFile(content, fileName, contentType) {
     a.click();
     if(contentType) URL.revokeObjectURL(a.href);
 }
-
-function getViewerHtmlTemplate(data) {
-    const embeddedData = JSON.stringify(data, null, 2);
-    return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>炒鸡Show</title><script type="text/javascript">window._AMapSecurityConfig={securityJsCode:'4bd78013b9b1e6d56bb8868748a7ed77'}<\/script><script src="https://webapi.amap.com/maps?v=2.0&key=ce5fe3ad94d38363f962a5a02a3c8654"><\/script><style>:root{--primary-color:#1890ff;--text-color:#333;--text-secondary:#666;--border-color:#d9d9d9;--bg-color:#f5f5f5;--header-bg:linear-gradient(135deg,#1a2a6c,#204f9e);--shadow-medium:0 4px 12px rgba(0,0,0,0.15);--border-radius:6px}*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Microsoft YaHei',sans-serif;height:100vh;display:flex;flex-direction:column}.header{background:var(--header-bg);color:white;padding:12px 24px;box-shadow:var(--shadow-medium);z-index:1000;display:flex;align-items:center;justify-content:space-between}.header-title{font-size:20px;font-weight:600;display:flex;align-items:center;height:100%}#map{flex:1;height:100%;position:relative}.info-window{min-width:320px;max-width:450px;max-height:400px;background:white;border-radius:var(--border-radius);box-shadow:var(--shadow-medium);border:1px solid var(--border-color);display:flex;flex-direction:column}.info-header{background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 20px;font-weight:600;display:flex;justify-content:space-between;align-items:center;font-size:16px}.info-close{background:none;border:none;color:white;font-size:20px;cursor:pointer}.info-content{padding:16px;overflow-y:auto}.info-table{width:100%;border-collapse:collapse}.info-table th{background:var(--bg-color);padding:10px;text-align:left;font-weight:600;font-size:14px}.info-table td{padding:10px;border-bottom:1px solid #eee;font-size:14px;vertical-align:top}.info-table tr:last-child td{border-bottom:none}.marker-container{position:relative;display:flex;justify-content:center;align-items:center}.marker-icon{box-shadow:0 2px 8px rgba(0,0,0,0.3);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);border-radius:50%}.feature-label{background:rgba(255,255,255,0.95);padding:4px 8px;border-radius:4px;font-size:12px;font-weight:500;box-shadow:0 2px 6px rgba(0,0,0,0.2);border:1px solid #ddd;max-width:150px;pointer-events:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);text-align:center}.coordinates{position:absolute;bottom:10px;left:10px;background:rgba(255,255,255,0.8);padding:8px 12px;border-radius:var(--border-radius);font-size:13px;box-shadow:var(--shadow-medium);z-index:100;font-family:'Courier New',monospace}<\/style><\/head><body><div class="header"><div class="header-title"><svg width="32" height="32" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M640 119.68l-256.64 96L96 122.24v674.56L384 904.32l256.64-96 287.36 93.44V227.2L640 119.68z m224 152.32v263.04l-399.36 49.28-46.08-313.6L640 187.52l224 84.48z m-704 200.32l214.4-60.16 26.24 180.48-240.64 29.44V472.32z m194.56-199.04l10.88 74.88-205.44 57.6V210.56l194.56 62.72zM160 752v-65.28l250.24-31.36 23.68 161.92-49.92 19.2-224-84.48z m479.36-11.52l-144 53.76-21.76-146.56 390.4-48.64v214.4l-224.64-72.96z" fill="#ffffff"></path><path d="M601.6 422.4l51.2 51.2 51.2-51.2c28.16-28.16 28.16-74.24 0-102.4s-74.24-28.16-102.4 0-28.16 74.24 0 102.4z" fill="#ffffff"></path></svg>炒鸡Show</div><button onclick="webGISViewer.toggleLabels()" style="background:#fff;border:1px solid #ccc;padding:8px 12px;border-radius:6px;cursor:pointer">显隐标签<\/button><\/div><div id="map"><\/div><script>window.exportedData=${embeddedData};<\/script><script>class WebGISViewer{constructor(){this.map=null;this.features=[];this.infoWindow=null;this.labelsVisible=!0;this.init()}async init(){const e=window.exportedData;e?(await this.initMap(e.mapView),this.loadFeatures(e.features)):alert("地图数据加载失败!")}initMap(e){return new Promise((t,i)=>{this.map=new AMap.Map("map",{zoom:e.zoom,center:e.center,viewMode:"2D",WebGLParams:{preserveDrawingBuffer:!0},crossOrigin:"anonymous"});this.map.on("complete",()=>{this.drawingLayer=new AMap.OverlayGroup,this.map.add(this.drawingLayer),AMap.plugin(["AMap.Scale"],()=>{this.map.addControl(new AMap.Scale)}),t()});this.map.on("error",i);this.map.on("click",e=>{this.infoWindow&&(!e.target||!e.target.getExtData)&&this.infoWindow.close()})})}loadFeatures(e){e.forEach(e=>{let t;const i={id:e.id,properties:e.properties,type:e.type,style:e.style};"point"===e.type?t=new AMap.Marker({position:e.geometry.coordinates,content:this.createMarkerContent(e),offset:new AMap.Pixel(0,0),extData:i}):"polyline"===e.type?t=new AMap.Polyline({path:e.geometry.coordinates,strokeColor:e.style.color,strokeWeight:e.style.weight,strokeOpacity:e.style.opacity,strokeStyle:e.style.style||"solid",extData:i}):"polygon"===e.type&&(t=new AMap.Polygon({path:e.geometry.coordinates,fillColor:e.style.fillColor,fillOpacity:e.style.fillOpacity,strokeColor:e.style.strokeColor,strokeWeight:e.style.strokeWeight,strokeOpacity:e.style.strokeOpacity,extData:i}));t&&(t.on("click",e=>{this.showFeatureInfo(e.target),e.stopPropagation()}),this.drawingLayer.addOverlay(t),this.features.push({...e,graphic:t}))});e.length>0&&setTimeout(()=>this.map.setFitView(null,!1,[60,60,60,60]),200)}escapeHTML(e){return e?e.toString().replace(/[&<>"']/g,e=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[e])):""}createMarkerContent(e){const t=document.createElement("div");t.className="marker-container";const i=document.createElement("div");i.className="marker-icon";const o=e.style.size||14;i.style.cssText="width:"+o+"px; height:"+o+"px; background-color:"+(e.style.fillColor||"#FF4444")+"; border: 2px solid "+(e.style.borderColor||"#000000")+"; opacity:"+e.style.opacity;const n=document.createElement("div");n.className="feature-label";const a=e.style.labelFields||(e.properties.name?["name"]:[]),s=a.map(t=>this.escapeHTML(e.properties[t])).filter(e=>e).join(" ");return n.innerHTML=s,n.style.display=this.labelsVisible&&s?"block":"none",t.appendChild(i),t.appendChild(n),t}showFeatureInfo(e){this.infoWindow&&this.infoWindow.close();const t=e.getExtData(),i=document.createElement("div");i.className="info-window",i.addEventListener("wheel",e=>{e.stopPropagation()});const o=t.properties.name||t.properties["项目名称"]||"(未命名)";let n="";for(let e in t.properties)n+='<tr><td style="width: 30%; font-weight: 600;">'+this.escapeHTML(e)+"</td><td>"+this.escapeHTML(t.properties[e])+"</td></tr>";i.innerHTML='<div class="info-header"><span>'+this.escapeHTML(o)+'</span><button class="info-close" onclick="webGISViewer.infoWindow.close()">×</button></div><div class="info-content"><table class="info-table"><tbody>'+n+'</tbody></table></div>',this.infoWindow=new AMap.InfoWindow({isCustom:!0,content:i,offset:new AMap.Pixel(0,-20),anchor:"bottom-center"});let a;"point"===t.type?a=e.getPosition():a=e.getBounds().getCenter();this.infoWindow.open(this.map,a)}toggleLabels(){this.labelsVisible=!this.labelsVisible,this.features.forEach(e=>{"point"===e.type&&e.graphic&&e.graphic.setContent(this.createMarkerContent(e))})}}let webGISViewer;document.addEventListener("DOMContentLoaded",()=>{webGISViewer=new WebGISViewer});<\/script><\/body><\/html>`;
-}
-
 </script>
 
 <style scoped>

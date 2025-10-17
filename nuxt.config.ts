@@ -25,9 +25,9 @@ export default defineNuxtConfig({
           `,
           type: 'text/javascript',
         },
-        // AMap JS API
+        // AMap JS API with AutoComplete, PlaceSearch, and DistrictSearch plugins
         {
-          src: `https://webapi.amap.com/maps?v=2.0&key=ce5fe3ad94d38363f962a5a02a3c8654`,
+          src: `https://webapi.amap.com/maps?v=2.0&key=ce5fe3ad94d38363f962a5a02a3c8654&plugin=AMap.AutoComplete,AMap.PlaceSearch,AMap.DistrictSearch`,
           defer: true, 
         },
         // XLSX for Excel import/export
