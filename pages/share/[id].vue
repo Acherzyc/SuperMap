@@ -19,13 +19,14 @@
     <div class="main-container">
       <div id="map-viewer" class="map-viewer"></div>
 
-      <div id="map-search-container">
-        <div class="search-icon">
+      <div id="map-search-container" :class="{ 'is-active': isSearchActive }">
+        <div class="search-icon" @click="toggleSearch">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2.5"/><path d="M21 21L16.65 16.65" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <input type="text" id="search-input" placeholder="搜索地点...">
+        <input type="text" id="search-input" placeholder="搜索地点或区域...">
         <div id="search-results-panel"></div>
       </div>
+
       <div class="bottom-panel-backdrop" :class="{ 'is-visible': panelState.isMobilePanelOpen }" @click="panelActions.closeMobilePanel"></div>
       
       <SidePanel
@@ -69,9 +70,9 @@ const allFeatures = ref([]);
 const selectedFeatureId = ref(null);
 const labelsVisible = ref(true);
 const isSatelliteVisible = ref(false);
-let satelliteLayer, roadNetLayer, drawingLayer, placeSearch;
+const isSearchActive = ref(false);
+let satelliteLayer, roadNetLayer, drawingLayer, placeSearch, districtSearch, searchOverlayGroup;
 
-// --- Responsive Panel Logic ---
 function useResponsivePanel(selectedIdRef) {
   const isMobileView = ref(window.innerWidth <= 768);
   const panelState = reactive({ isDesktopPanelCollapsed: false, isMobilePanelOpen: false });
@@ -111,12 +112,25 @@ onMounted(() => {
   }
   
   const checkAMap = setInterval(() => {
-    if (window.AMap && typeof window.AMap.Map === 'function' && typeof window.AMap.PlaceSearch === 'function') {
+    if (window.AMap && typeof window.AMap.Map === 'function' && typeof window.AMap.PlaceSearch === 'function' && typeof window.AMap.DistrictSearch === 'function') {
       clearInterval(checkAMap);
       loadMapData(shareId);
     }
   }, 100);
+
+  document.addEventListener('keydown', handleGlobalKeyDown);
 });
+
+onBeforeUnmount(() => {
+    document.removeEventListener('keydown', handleGlobalKeyDown);
+});
+
+const handleGlobalKeyDown = (e) => {
+    if (e.key === 'Escape') {
+        isSearchActive.value = false;
+        panelActions.closeMobilePanel();
+    }
+};
 
 async function loadMapData(shareId) {
   try {
@@ -126,7 +140,7 @@ async function loadMapData(shareId) {
         throw new Error("分享的地图数据不存在或已被删除。");
     }
     initMap(data.map_data);
-    initSearch(); // <-- 新增: 初始化搜索
+    initSearch();
   } catch (e) {
     showToast(`加载失败: ${e.message}`, 'error');
   } finally {
@@ -145,12 +159,18 @@ function initMap(mapData) {
   });
 
   map.value.on('click', (e) => { 
+    if (e.target.CLASS_NAME !== 'AMap.Map') {
+      if (e.target.getExtData && e.target.getExtData().id) return
+    }
+    isSearchActive.value = false;
+    searchOverlayGroup.clearOverlays();
     if (!e.target?.getExtData?.().id) panelActions.deselectAndClose();
   });
 
   map.value.on('complete', () => {
     drawingLayer = new AMap.OverlayGroup();
-    map.value.add(drawingLayer);
+    searchOverlayGroup = new AMap.OverlayGroup();
+    map.value.add([drawingLayer, searchOverlayGroup]);
 
     satelliteLayer = new AMap.TileLayer.Satellite();
     roadNetLayer = new AMap.TileLayer.RoadNet();
@@ -174,25 +194,50 @@ function initSearch() {
         city: '全国'
     });
 
-    placeSearch = new AMap.PlaceSearch({
-        map: map.value,
-        panel: searchResultsPanel,
-        autoFitView: true
+    placeSearch = new AMap.PlaceSearch({});
+    
+    districtSearch = new AMap.DistrictSearch({
+        subdistrict: 0,
+        extensions: 'all',
+        level: 'district'
     });
 
     autoComplete.on('select', (e) => {
-        placeSearch.setCity(e.poi.adcode);
-        placeSearch.search(e.poi.name, (status, result) => {
-            if (status === 'complete' && result.info === 'OK') {
-                if (result.poiList.pois.length > 0) {
-                    map.value.setZoomAndCenter(15, result.poiList.pois[0].location);
-                }
+        searchOverlayGroup.clearOverlays();
+        const keyword = e.poi.district || e.poi.name;
+
+        districtSearch.search(keyword, (status, result) => {
+            if (status === 'complete' && result.info === 'OK' && result.districtList.length > 0 && result.districtList[0].boundaries) {
+                const bounds = result.districtList[0].boundaries;
+                const polygon = new AMap.Polygon({
+                    path: bounds,
+                    strokeWeight: 3,
+                    strokeColor: '#00D3FC',
+                    fillColor: '#00D3FC',
+                    fillOpacity: 0.25
+                });
+                searchOverlayGroup.addOverlay(polygon);
+                map.value.setFitView([polygon]);
+            } else {
+                placeSearch.search(e.poi.name, (poiStatus, poiResult) => {
+                    if (poiStatus === 'complete' && poiResult.info === 'OK' && poiResult.poiList.pois.length > 0) {
+                        const firstPoi = poiResult.poiList.pois[0];
+                        const marker = new AMap.Marker({
+                            position: firstPoi.location,
+                        });
+                        searchOverlayGroup.addOverlay(marker);
+                        map.value.setZoomAndCenter(17, firstPoi.location);
+                    }
+                });
             }
         });
-        searchInput.value = '';
+
+        searchInput.value = e.poi.name;
+        searchResultsPanel.style.display = 'none';
+        isSearchActive.value = false;
+        searchInput.blur();
     });
 }
-
 
 function addFeatureToMap(feature) {
     let graphic;
@@ -279,6 +324,16 @@ async function exportAsImage() {
         const el = document.querySelector(s);
         if (el) el.style.removeProperty('visibility');
     });
+  }
+}
+
+function toggleSearch() {
+  isSearchActive.value = !isSearchActive.value;
+  const input = document.getElementById('search-input');
+  if (isSearchActive.value) {
+    input.focus();
+  } else {
+    input.blur();
   }
 }
 

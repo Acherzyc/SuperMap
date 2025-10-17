@@ -6,7 +6,9 @@
       @import-file="handleFileImport"
       @export-excel="exportToExcel"
       @open-cloud-panel="isCloudPanelVisible = true"
+
       @generate-share-link="shareToCloud"
+
       @toggle-map-style="toggleMapStyle"
       @save-image="exportAsImage"
       @clear-all="clearAll"
@@ -15,20 +17,6 @@
 
     <div class="main-container">
       <div id="map" :class="{ 'drawing-mode': isDrawingMode }"></div>
-
-      <div id="map-search-container" :class="{ 'is-active': isSearchActive }">
-        <div class="search-icon" @click="toggleSearch">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2.5"/><path d="M21 21L16.65 16.65" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <input type="text" id="search-input" placeholder="搜索地点或区域...">
-        <div id="search-results-panel"></div>
-      </div>
-      
-      <DrawingToolbar
-        v-if="isDrawing && (currentTool === 'polyline' || currentTool === 'polygon')"
-        @finish-drawing="finishDrawing"
-        @cancel-drawing="cancelDrawing"
-      />
 
       <button id="mobilePanelToggle" class="mobile-panel-toggle-btn" title="显示/隐藏数据面板" @click="toggleMobilePanel">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 6H21M8 12H21M8 18H21M3 6H3.01M3 12H3.01M3 18H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -68,7 +56,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import DrawingToolbar from '~/components/DrawingToolbar.vue';
 import CloudSyncPanel from '~/components/CloudSyncPanel.vue';
 import { useSupabaseClient, useSupabaseUser } from '#imports';
@@ -83,25 +71,23 @@ const isLoading = ref(false);
 const toast = reactive({ message: '', type: 'info', visible: false });
 const mouseCoords = reactive({ lng: '--', lat: '--' });
 
+// === FINAL OPTIMIZATION: AMap.MouseTool integration ===
+let mouseTool = null; 
+// ======================================================
+
 // Drawing state
-const isDrawing = ref(false);
-let tempPoints = [];
-let tempGraphic = null;
+const isDrawing = ref(false); // This will now be controlled by MouseTool
 let drawingLayer = null;
 
 // UI State
 const labelsVisible = ref(true);
 const isDesktopPanelCollapsed = ref(false);
 const isMobilePanelOpen = ref(false);
-const isSearchActive = ref(false); // 新增: 控制搜索框激活状态
 
 // Other
 let featureIdCounter = 1;
 let rangingTool = null;
 let isSatelliteVisible = ref(false);
-let placeSearch = null;
-let districtSearch = null;
-let searchOverlayGroup = null; // 新增: 用于存放搜索结果的图层
 
 // Map Layers
 let satelliteLayer = null;
@@ -123,12 +109,11 @@ const defaultStyles = {
 // --- COMPUTED PROPERTIES ---
 const isDrawingMode = computed(() => ['point', 'polyline', 'polygon'].includes(currentTool.value));
 const drawTipText = computed(() => {
-    if (!isDrawing.value || !isDrawingMode.value) return '';
-    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+    if (!isDrawingMode.value || currentTool.value === 'select') return '';
     const tips = {
         point: '点击地图添加点标注',
-        polyline: isMobile ? '点击地图绘制线段, 按 ✓ 结束' : '点击地图绘制线段, 双击结束, 右键取消',
-        polygon: isMobile ? '点击地图绘制多边形, 按 ✓ 结束' : '点击地图绘制多边形, 双击结束, 右键取消'
+        polyline: '点击地图开始绘制线段, 双击或右键结束',
+        polygon: '点击地图开始绘制多边形, 双击或右键结束'
     };
     return tips[currentTool.value];
 });
@@ -136,7 +121,7 @@ const drawTipText = computed(() => {
 // --- LIFECYCLE HOOK ---
 onMounted(() => {
   const checkAMap = setInterval(() => {
-    if (window.AMap && typeof window.AMap.Map === 'function' && typeof window.AMap.PlaceSearch === 'function' && typeof window.AMap.DistrictSearch === 'function') {
+    if (window.AMap && typeof window.AMap.Map === 'function') {
       clearInterval(checkAMap);
       init();
     }
@@ -153,7 +138,6 @@ onBeforeUnmount(() => {
 async function init() {
   try {
     await initMap();
-    initSearch();
     bindGlobalEvents();
     showToast('系统初始化完成', 'success');
   } catch (error) {
@@ -176,24 +160,33 @@ function initMap() {
 
       map.value.on('complete', () => {
         drawingLayer = new AMap.OverlayGroup();
-        searchOverlayGroup = new AMap.OverlayGroup(); // 初始化搜索图层
-        map.value.add([drawingLayer, searchOverlayGroup]);
+        map.value.add(drawingLayer);
 
         satelliteLayer = new AMap.TileLayer.Satellite();
         roadNetLayer = new AMap.TileLayer.RoadNet();
         map.value.add([satelliteLayer, roadNetLayer]);
         satelliteLayer.hide();
         roadNetLayer.hide();
-
-        AMap.plugin(['AMap.Scale', 'AMap.RangingTool'], () => {
+        
+        // === FINAL OPTIMIZATION: Initialize MouseTool ===
+        AMap.plugin(['AMap.Scale', 'AMap.RangingTool', 'AMap.MouseTool'], () => {
           map.value.addControl(new AMap.Scale());
           rangingTool = new AMap.RangingTool(map.value);
+          
+          mouseTool = new AMap.MouseTool(map.value);
+          mouseTool.on('draw', handleDrawComplete);
         });
+        // ===============================================
 
         map.value.on('mousemove', handleMapMouseMove);
-        map.value.on('click', handleMapClick);
-        map.value.on('dblclick', handleMapDoubleClick);
-        map.value.on('rightclick', handleMapRightClick);
+        
+        // The click, dblclick, and rightclick handlers are now managed by MouseTool for drawing.
+        // We only need a general click for feature selection.
+        map.value.on('click', (e) => {
+            if (currentTool.value === 'select' && e.target?.getExtData?.().id) {
+                selectFeatureById(e.target.getExtData().id);
+            }
+        });
 
         resolve();
       });
@@ -206,61 +199,6 @@ function initMap() {
   });
 }
 
-function initSearch() {
-    const searchInput = document.getElementById('search-input');
-    const searchResultsPanel = document.getElementById('search-results-panel');
-
-    const autoComplete = new AMap.AutoComplete({
-        input: searchInput,
-        panel: searchResultsPanel,
-        city: '全国'
-    });
-
-    placeSearch = new AMap.PlaceSearch({});
-    
-    districtSearch = new AMap.DistrictSearch({
-        subdistrict: 0,
-        extensions: 'all',
-        level: 'district'
-    });
-
-    autoComplete.on('select', (e) => {
-        searchOverlayGroup.clearOverlays();
-        const keyword = e.poi.district || e.poi.name;
-        
-        districtSearch.search(keyword, (status, result) => {
-            if (status === 'complete' && result.info === 'OK' && result.districtList.length > 0 && result.districtList[0].boundaries) {
-                const bounds = result.districtList[0].boundaries;
-                const polygon = new AMap.Polygon({
-                    path: bounds,
-                    strokeWeight: 3,
-                    strokeColor: '#00D3FC',
-                    fillColor: '#00D3FC',
-                    fillOpacity: 0.25
-                });
-                searchOverlayGroup.addOverlay(polygon);
-                map.value.setFitView([polygon]);
-            } else {
-                placeSearch.search(e.poi.name, (poiStatus, poiResult) => {
-                    if (poiStatus === 'complete' && poiResult.info === 'OK' && poiResult.poiList.pois.length > 0) {
-                        const firstPoi = poiResult.poiList.pois[0];
-                        const marker = new AMap.Marker({
-                            position: firstPoi.location,
-                        });
-                        searchOverlayGroup.addOverlay(marker);
-                        map.value.setZoomAndCenter(17, firstPoi.location);
-                    }
-                });
-            }
-        });
-
-        searchInput.value = e.poi.name;
-        searchResultsPanel.style.display = 'none';
-        isSearchActive.value = false;
-        searchInput.blur();
-    });
-}
-
 
 function bindGlobalEvents() {
     document.addEventListener('keydown', handleGlobalKeyDown);
@@ -268,10 +206,11 @@ function bindGlobalEvents() {
 
 const handleGlobalKeyDown = (e) => {
     if (e.key === 'Escape') {
-        cancelDrawing();
+        if (isDrawing.value) {
+            cancelDrawing();
+        }
         closeMobilePanel();
         isCloudPanelVisible.value = false;
-        isSearchActive.value = false;
     } else if (e.key === 'Delete' && selectedFeature.value) {
         deleteFeature(selectedFeature.value.id);
     }
@@ -284,114 +223,118 @@ const handleMapMouseMove = (e) => {
     }
 };
 
+// --- Tooling & Drawing ---
+
 function setTool(tool) {
-    currentTool.value = tool;
-    if (tool === 'ranging') {
-        rangingTool?.turnOn();
-        showToast('测距工具已启用', 'success');
-    } else {
-        rangingTool?.turnOff(true);
+    // Always close any active tool before starting a new one
+    if (mouseTool) {
+        mouseTool.close(true); // true means close and remove the drawing
     }
-    if (isDrawing.value) cancelDrawing();
+    isDrawing.value = false;
+    
+    currentTool.value = tool;
+
+    // Stop ranging tool if active
+    rangingTool?.turnOff(true);
+
+    switch (tool) {
+        case 'point':
+            mouseTool.marker({
+                content: createMarkerContent({ style: defaultStyles.point, properties: {} }),
+                offset: new AMap.Pixel(0, 0),
+            });
+            isDrawing.value = true;
+            break;
+        case 'polyline':
+            mouseTool.polyline({
+                strokeColor: defaultStyles.polyline.color,
+                strokeWeight: defaultStyles.polyline.weight,
+                strokeOpacity: defaultStyles.polyline.opacity,
+                strokeStyle: 'solid',
+            });
+            isDrawing.value = true;
+            break;
+        case 'polygon':
+            mouseTool.polygon({
+                fillColor: defaultStyles.polygon.fillColor,
+                fillOpacity: defaultStyles.polygon.fillOpacity,
+                strokeColor: defaultStyles.polygon.strokeColor,
+                strokeWeight: defaultStyles.polygon.strokeWeight,
+            });
+            isDrawing.value = true;
+            break;
+        case 'ranging':
+            rangingTool?.turnOn();
+            showToast('测距工具已启用', 'success');
+            break;
+        case 'select':
+            // MouseTool is already closed, do nothing.
+            break;
+    }
     closeMobilePanel();
 }
 
-function handleMapClick(e) {
-    if (e.target.CLASS_NAME !== 'AMap.Map') {
-      if (e.target.getExtData && e.target.getExtData().id) return
+
+function handleDrawComplete(event) {
+    const obj = event.obj; // The drawn graphic object (Marker, Polyline, Polygon)
+    let featureData = {};
+    let type = '';
+
+    // Determine type and extract geometry
+    if (obj instanceof AMap.Marker) {
+        type = 'point';
+        const position = obj.getPosition();
+        featureData.geometry = { coordinates: [position.getLng(), position.getLat()] };
+    } else if (obj instanceof AMap.Polyline) {
+        type = 'polyline';
+        const path = obj.getPath().map(p => [p.getLng(), p.getLat()]);
+        featureData.geometry = { coordinates: path };
+    } else if (obj instanceof AMap.Polygon) {
+        type = 'polygon';
+        const path = obj.getPath().map(p => [p.getLng(), p.getLat()]);
+        featureData.geometry = { coordinates: path };
     }
 
-    if (currentTool.value === 'ranging') return;
-
-    searchOverlayGroup.clearOverlays();
-
-    const point = [e.lnglat.getLng(), e.lnglat.getLat()];
-    if (currentTool.value === 'point') addPoint(point);
-    else if (['polyline', 'polygon'].includes(currentTool.value)) addTempPoint(point);
-}
-
-function handleMapDoubleClick() {
-    if (isDrawing.value && ['polyline', 'polygon'].includes(currentTool.value)) {
-        if (tempPoints.length > 1) tempPoints.pop();
-        finishDrawing();
+    if (type) {
+        const feature = {
+            id: 'feature_' + featureIdCounter++,
+            type: type,
+            geometry: featureData.geometry,
+            properties: { name: `${{point:'点',polyline:'线',polygon:'面'}[type]}${features.value.filter(f => f.type === type).length + 1}` },
+            style: JSON.parse(JSON.stringify(defaultStyles[type]))
+        };
+        
+        // Remove the temporary graphic drawn by MouseTool
+        mouseTool.close(false); // false keeps the overlay on map, but we will add our own permanent one
+        map.value.remove(obj);
+        
+        // Add our own feature which is managed by our state
+        addFeature(feature);
+        showToast('添加成功', 'success');
     }
+    
+    // Reset tool to select mode after drawing
+    setTool('select');
 }
 
-function handleMapRightClick() {
-    if (isDrawing.value) {
-        cancelDrawing();
-        showToast('绘制已取消', 'warning');
+
+function cancelDrawing() {
+    if (mouseTool) {
+        mouseTool.close(true); // true will clear the drawing
     }
-}
-
-function toggleSearch() {
-  isSearchActive.value = !isSearchActive.value;
-  const input = document.getElementById('search-input');
-  if (isSearchActive.value) {
-    input.focus();
-  } else {
-    input.blur();
-    const panel = document.getElementById('search-results-panel');
-    if(panel) panel.style.display = 'none';
-  }
-}
-
-function addPoint(coordinates) {
-    const feature = {
-        id: 'feature_' + featureIdCounter++,
-        type: 'point',
-        geometry: { coordinates },
-        properties: { name: `点${features.value.filter(f => f.type === 'point').length + 1}` },
-        style: JSON.parse(JSON.stringify(defaultStyles.point))
-    };
-    addFeature(feature);
-    showToast('添加点成功', 'success');
-}
-
-function addTempPoint(point) {
-    if (!isDrawing.value) isDrawing.value = true;
-    tempPoints.push(point);
-    updateTempGraphic();
-}
-
-function updateTempGraphic() {
-    if (tempGraphic) map.value.remove(tempGraphic);
-    if (tempPoints.length < 2) return;
-    const options = { strokeColor: '#0066FF', strokeWeight: 3, strokeOpacity: 0.8, strokeStyle: 'dashed' };
-    if (currentTool.value === 'polyline') {
-        tempGraphic = new AMap.Polyline({ path: tempPoints, ...options });
-    } else if (currentTool.value === 'polygon') {
-        tempGraphic = new AMap.Polygon({ path: tempPoints, ...options, fillColor: '#00AA00', fillOpacity: 0.3 });
-    }
-    if (tempGraphic) map.value.add(tempGraphic);
+    isDrawing.value = false;
+    setTool('select'); // Revert to select tool
 }
 
 function finishDrawing() {
-    const minPoints = currentTool.value === 'polygon' ? 3 : 2;
-    if (!isDrawing.value || tempPoints.length < minPoints) {
-        showToast(`${currentTool.value === 'polygon' ? '多边形' : '线段'}至少需要${minPoints}个点`, 'warning');
-        return cancelDrawing();
+    if (mouseTool) {
+        mouseTool.close(false); // false will trigger the 'draw' event
     }
-    const feature = {
-        id: 'feature_' + featureIdCounter++,
-        type: currentTool.value,
-        geometry: { coordinates: [...tempPoints] },
-        properties: { name: `${currentTool.value === 'polyline' ? '线' : '面'}${features.value.filter(f => f.type === currentTool.value).length + 1}` },
-        style: JSON.parse(JSON.stringify(defaultStyles[currentTool.value]))
-    };
-    addFeature(feature);
-    cancelDrawing();
-    showToast('添加成功', 'success');
+    // The rest is handled by handleDrawComplete
 }
 
-function cancelDrawing() {
-    isDrawing.value = false;
-    tempPoints = [];
-    if (tempGraphic) {
-        map.value.remove(tempGraphic);
-        tempGraphic = null;
-    }
-}
+
+// --- Feature Management (largely unchanged) ---
 
 function addFeature(feature) {
     if (features.value.some(f => f.id === feature.id)) return;
@@ -464,7 +407,7 @@ function deleteFeature(featureId) {
     if (index === -1) return;
 
     if (features.value[index] && features.value[index].graphic) {
-      map.value.remove(features.value[index].graphic);
+      drawingLayer.removeOverlay(features.value[index].graphic); // Use drawingLayer to remove
     }
 
     features.value.splice(index, 1);
@@ -498,6 +441,8 @@ function clearAll() {
     }
 }
 
+// --- Style & Property Updates ---
+
 function updateFeatureStyle({ featureId, styleUpdates }) {
     const feature = features.value.find(f => f.id === featureId);
     if (!feature) return;
@@ -524,6 +469,8 @@ function saveFeatureProperties({ featureId, properties, labelFields }) {
     }
     showToast('属性保存成功', 'success');
 }
+
+// --- Data I/O ---
 
 async function handleSaveProject(payload) {
   if (!user.value) return showToast('请先登录', 'error');
@@ -696,7 +643,7 @@ async function shareToCloud() {
 async function exportAsImage() {
     if (typeof html2canvas === 'undefined') return showToast('导出库加载失败', 'error');
     isLoading.value = true;
-    const elementsToHide = ['.header', '.side-panel', '.coordinates', '.draw-tip', '.amap-logo', '.amap-copyright', '#mobilePanelToggle', '.drawing-toolbar', '#map-search-container'];
+    const elementsToHide = ['.header', '.side-panel', '.coordinates', '.draw-tip', '.amap-logo', '.amap-copyright', '#mobilePanelToggle', '.drawing-toolbar'];
     elementsToHide.forEach(sel => {
         const el = document.querySelector(sel);
         if (el) el.style.visibility = 'hidden';
@@ -716,6 +663,8 @@ async function exportAsImage() {
         });
     }
 }
+
+// --- UI & UX Helpers ---
 
 function toggleDesktopPanel() { isDesktopPanelCollapsed.value = !isDesktopPanelCollapsed.value; }
 function toggleMobilePanel() { isMobilePanelOpen.value ? closeMobilePanel() : openMobilePanel(); }
@@ -753,6 +702,8 @@ function toggleMapStyle() {
     }
 }
 
+// --- UTILITIES ---
+
 function escapeHTML(str) {
     return str?.toString().replace(/[&<>"']/g, (match) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[match])) || '';
 }
@@ -773,6 +724,7 @@ function downloadFile(content, fileName, contentType) {
     a.click();
     if(contentType) URL.revokeObjectURL(a.href);
 }
+
 </script>
 
 <style scoped>
@@ -783,5 +735,9 @@ function downloadFile(content, fileName, contentType) {
 }
 .main-container {
   height: 100%;
+}
+/* Make cursor more intuitive when drawing */
+#map.drawing-mode {
+    cursor: crosshair;
 }
 </style>

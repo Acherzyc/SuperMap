@@ -799,8 +799,8 @@ body {
     overflow: hidden;
 }
 
-#map-search-container:hover,
-#map-search-container:focus-within {
+/* MODIFICATION: Use .is-active class instead of :hover/:focus-within */
+#map-search-container.is-active {
     width: 380px;
     max-width: calc(100vw - 30px);
 }
