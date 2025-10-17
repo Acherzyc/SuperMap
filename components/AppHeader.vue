@@ -8,6 +8,9 @@
       <div class="toolbar">
         <div class="tool-group">
           <button class="tool-btn" :class="{ active: currentTool === 'select' }" @click="$emit('setTool', 'select')" title="选择工具"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3L10.07 19.97L12.58 12.58L19.97 10.07L3 3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+          <button class="tool-btn" :class="{ active: currentTool === 'box-select' }" @click="$emit('setTool', 'box-select')" title="框选工具">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 3H21V21H3V3Z" stroke="currentColor" stroke-width="2" stroke-dasharray="4 2"/></svg>
+          </button>
           <button class="tool-btn" :class="{ active: currentTool === 'point' }" @click="$emit('setTool', 'point')" title="绘制点"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="4" fill="currentColor"/></svg></button>
           <button class="tool-btn" :class="{ active: currentTool === 'polyline' }" @click="$emit('setTool', 'polyline')" title="绘制线"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12L7 4L13 14L17 6L21 12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
           <button class="tool-btn" :class="{ active: currentTool === 'polygon' }" @click="$emit('setTool', 'polygon')" title="绘制面"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L3 7L3 17L12 22L21 17V7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
@@ -47,13 +50,10 @@ defineProps({
   currentTool: String
 });
 
-// ========== 代码变更开始 ==========
-// 确保 'generateShareLink' 在这个数组中
 defineEmits([
   'setTool', 'importFile', 'exportExcel', 'openCloudPanel', 'generateShareLink',
   'toggleMapStyle', 'saveImage', 'clearAll', 'toggleLabels'
 ]);
-// ========== 代码变更结束 ==========
 
 const supabase = useSupabaseClient();
 

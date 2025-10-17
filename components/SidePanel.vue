@@ -32,10 +32,19 @@
         <button class="filter-btn" :class="{ active: activeFilter === 'polyline' }" @click="activeFilter = 'polyline'">线</button>
         <button class="filter-btn" :class="{ active: activeFilter === 'polygon' }" @click="activeFilter = 'polygon'">面</button>
       </div>
+      
+      <div v-if="!readonly && multiSelectedIds && multiSelectedIds.length > 0" class="batch-actions">
+          <p class="batch-info">已选中 {{ multiSelectedIds.length }} 个要素</p>
+          <div class="batch-buttons">
+            <button class="batch-btn" @click="$emit('batchEditStyle')">改样式</button>
+            <button class="batch-btn" @click="$emit('batchEditProperties')">改属性</button>
+            <button class="batch-btn delete" @click="$emit('batchDelete')">删除</button>
+          </div>
+      </div>
     </div>
     
     <div class="data-list">
-      <div v-if="!features.length" class="empty-state">
+       <div v-if="!features.length" class="empty-state">
         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 10C21 17 12 23 12 23C12 23 3 17 3 10C3 5.58172 6.58172 2 11 2C15.4183 2 19 5.58172 19 10C19 10.5523 19.4477 11 20 11C20.5523 11 21 10.5523 21 10Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="2"/></svg>
         <h3>暂无数据</h3>
         <p>开始绘制或导入数据来创建地图要素</p>
@@ -50,7 +59,8 @@
         :key="feature.id"
         :data-id="feature.id"
         :feature="feature"
-        :is-selected="feature.id === selectedFeatureId"
+        :is-highlighted="isHighlighted(feature.id)"
+        :is-expanded="feature.id === selectedFeatureId && (!multiSelectedIds || multiSelectedIds.length === 0)"
         :readonly="readonly"
         @select-feature="$emit('featureSelected', feature.id)"
         @delete-feature="$emit('featureDeleted', feature.id)"
@@ -69,6 +79,10 @@ import DataItem from './DataItem.vue';
 const props = defineProps({
   features: Array,
   selectedFeatureId: String,
+  multiSelectedIds: {
+    type: Array,
+    default: () => []
+  },
   isPanelCollapsed: Boolean,
   isMobilePanelOpen: Boolean,
   readonly: {
@@ -79,12 +93,18 @@ const props = defineProps({
 
 const emit = defineEmits([
   'toggleDesktopPanel', 'closeMobilePanel', 'featureSelected', 'featureDeleted',
-  'zoomToFeature', 'updateFeatureStyle', 'saveFeatureProperties'
+  'zoomToFeature', 'updateFeatureStyle', 'saveFeatureProperties',
+  'batchDelete', 'batchEditStyle', 'batchEditProperties'
 ]);
 
 const searchTerm = ref('');
 const activeFilter = ref('all');
 const sidePanelRef = ref(null);
+
+const isHighlighted = (featureId) => {
+  if (props.selectedFeatureId === featureId) return true;
+  return props.multiSelectedIds && props.multiSelectedIds.includes(featureId);
+};
 
 watch(() => props.selectedFeatureId, (newId) => {
   if (newId) {
@@ -95,10 +115,15 @@ watch(() => props.selectedFeatureId, (newId) => {
   }
 });
 
-// **优化点：实现选中项置顶和过滤逻辑**
 const orderedFeatures = computed(() => {
-  // 1. 过滤
-  let items = props.features.filter(f => {
+  let sourceFeatures = props.features;
+
+  if (props.multiSelectedIds && props.multiSelectedIds.length > 0) {
+    const selectedSet = new Set(props.multiSelectedIds);
+    sourceFeatures = props.features.filter(f => selectedSet.has(f.id));
+  }
+
+  let items = sourceFeatures.filter(f => {
     const filterMatch = activeFilter.value === 'all' || f.type === activeFilter.value;
     const searchMatch = !searchTerm.value.trim() || 
                         (f.properties.name || f.properties['项目名称'] || '')
@@ -106,20 +131,17 @@ const orderedFeatures = computed(() => {
     return filterMatch && searchMatch;
   });
 
-  // 2. 置顶
-  if (props.selectedFeatureId) {
+  if (props.selectedFeatureId && (!props.multiSelectedIds || props.multiSelectedIds.length === 0)) {
     const selected = items.find(f => f.id === props.selectedFeatureId);
     if (selected) {
       items = items.filter(f => f.id !== props.selectedFeatureId);
-      items.unshift(selected); // 将选中项移动到数组开头
+      items.unshift(selected);
     }
   }
   
   return items;
 });
 
-
-// 移动端面板拖拽逻辑 (保持不变)
 const isDragging = ref(false);
 const startY = ref(0);
 const startHeight = ref(0);
@@ -164,3 +186,46 @@ function handleTouchEnd() {
   }
 }
 </script>
+
+<style scoped>
+.batch-actions {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+.batch-info {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+.batch-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+}
+.batch-btn {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    background-color: white;
+    color: var(--text-color);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: var(--transition);
+}
+.batch-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background-color: #e6f7ff;
+}
+.batch-btn.delete {
+    background-color: var(--error-color);
+    border-color: var(--error-color);
+    color: white;
+}
+.batch-btn.delete:hover {
+    opacity: 0.85;
+}
+</style>

@@ -1,7 +1,7 @@
 <template>
   <div
     class="data-item"
-    :class="{ selected: isSelected, expanded: isSelected }"
+    :class="{ selected: isHighlighted, expanded: isExpanded }"
     :data-id="feature.id"
     @click="handleItemClick"
   >
@@ -18,7 +18,7 @@
     </div>
 
     <div class="data-item-details">
-      <div class="data-item-card" v-if="isSelected">
+      <div class="data-item-card" v-if="isExpanded">
 
         <div v-if="readonly">
           <h4>属性信息</h4>
@@ -39,7 +39,7 @@
               <tr>
                 <th style="width: 25%;">属性</th>
                 <th style="width: 50%;">值</th>
-                <th v-if="feature.type === 'point'" style="width: 15%;">标签</th>
+                <th style="width: 15%;">标签</th>
                 <th style="width: 10%;">操作</th>
               </tr>
             </thead>
@@ -47,7 +47,7 @@
               <tr v-for="(prop, index) in editableProperties" :key="index">
                 <td><input type="text" v-model="prop.key"></td>
                 <td><input type="text" v-model="prop.value"></td>
-                <td v-if="feature.type === 'point'">
+                <td>
                   <input type="checkbox" v-model="prop.isLabel">
                 </td>
                 <td><button class="delete-row-btn" @click="deleteProperty(index)" title="删除属性">×</button></td>
@@ -92,7 +92,8 @@ import { ref, computed, watch } from 'vue';
 
 const props = defineProps({
   feature: Object,
-  isSelected: Boolean,
+  isHighlighted: Boolean, // MODIFIED: Renamed from isSelected
+  isExpanded: Boolean,    // ADDED: New prop for expansion control
   readonly: {
     type: Boolean,
     default: false
@@ -107,10 +108,10 @@ const readonlyProperties = computed(() => {
   if (!props.feature || !props.feature.properties) return [];
   return Object.entries(props.feature.properties)
     .map(([key, value]) => ({ key, value: value || '' }))
-    .filter(prop => prop.value); // Only show properties that have a value
+    .filter(prop => prop.value);
 });
 
-watch(() => props.isSelected, (newValue) => {
+watch(() => props.isExpanded, (newValue) => { // MODIFIED: Watch isExpanded instead
   if (newValue && props.feature && !props.readonly) {
     const labelFields = props.feature.style?.labelFields || [];
     editableProperties.value = Object.entries(props.feature.properties).map(([key, value]) => ({
@@ -127,7 +128,7 @@ const typeName = computed(() => ({ point: '点', polyline: '线', polygon: '面'
 const propsPreview = computed(() => {
   return Object.entries(props.feature.properties)
     .filter(([key, value]) => key !== 'name' && key !== '项目名称' && value)
-    .slice(0, 2) // Show max 2 properties in preview
+    .slice(0, 2)
     .map(([key, value]) => `<strong>${key}:</strong> ${value}`)
     .join('<br>');
 });
