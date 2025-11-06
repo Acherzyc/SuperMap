@@ -43,7 +43,20 @@ export default defineNuxtConfig({
   },
 
   devtools: { enabled: true },
-  
+
+  runtimeConfig: {
+    // 这些密钥只在服务器端可用
+    cloudinary: {
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+      apiKey: process.env.CLOUDINARY_API_KEY,
+      apiSecret: process.env.CLOUDINARY_API_SECRET,
+    },
+    // public 中的配置在客户端也可用
+    public: {
+      // 如果需要，可以在这里放非敏感信息
+    }
+  },
+
   modules: [
     '@nuxtjs/supabase',
   ],
