@@ -81,7 +81,38 @@
                   <div class="style-control"><label>边框粗细</label><input type="range" min="1" max="8" :value="feature.style.strokeWeight" @input="$emit('updateStyle', { strokeWeight: parseFloat($event.target.value) })"></div>
               </template>
           </div>
-        </div>
+          
+          <hr>
+          <h4>关联笔记</h4>
+          <div class="notes-section">
+            <NuxtLink 
+              v-if="currentProjectId" 
+              :to="`/notes/new?project_id=${currentProjectId}&feature_id=${feature.id}`"
+              class="add-row-btn"
+              target="_blank"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              创建新笔记
+            </NuxtLink>
+            
+            <div v-if="!currentProjectId" class="notes-placeholder">
+              请先保存或加载云端项目以启用笔记功能。
+            </div>
+
+            <ul v-if="notesList.length > 0" class="note-link-list">
+              <li v-for="note in notesList" :key="note.id">
+                <NuxtLink :to="`/notes/${note.id}`" target="_blank" class="note-link">
+                  <span class="note-link-title">{{ note.note_title || '(无标题)' }}</span>
+                  <span class="note-link-date">{{ formatRelativeTime(note.updated_at) }}</span>
+                </NuxtLink>
+              </li>
+            </ul>
+            
+            <div v-if="currentProjectId && notesList.length === 0" class="notes-placeholder">
+              此要素暂无笔记。
+            </div>
+          </div>
+          </div>
       </div>
     </div>
   </div>
@@ -90,14 +121,22 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 
+// --- *** 步骤 6 修改: 接收新 Props *** ---
 const props = defineProps({
   feature: Object,
-  isHighlighted: Boolean, // MODIFIED: Renamed from isSelected
-  isExpanded: Boolean,    // ADDED: New prop for expansion control
+  isHighlighted: Boolean,
+  isExpanded: Boolean,
   readonly: {
     type: Boolean,
     default: false
+  },
+  // --- 新增 ---
+  currentProjectId: [String, Number],
+  notesList: {
+    type: Array,
+    default: () => []
   }
+  // --- 结束新增 ---
 });
 
 const emit = defineEmits(['selectFeature', 'deleteFeature', 'zoomToFeature', 'updateStyle', 'saveProperties']);
@@ -111,7 +150,7 @@ const readonlyProperties = computed(() => {
     .filter(prop => prop.value);
 });
 
-watch(() => props.isExpanded, (newValue) => { // MODIFIED: Watch isExpanded instead
+watch(() => props.isExpanded, (newValue) => {
   if (newValue && props.feature && !props.readonly) {
     const labelFields = props.feature.style?.labelFields || [];
     editableProperties.value = Object.entries(props.feature.properties).map(([key, value]) => ({
@@ -161,4 +200,101 @@ function handleItemClick(event) {
   }
   emit('selectFeature');
 }
+
+// --- *** 步骤 6 新增: 格式化时间 *** ---
+function formatRelativeTime(dateString) {
+  const date = new Date(dateString)
+  return date.toLocaleString('zh-CN', { 
+    month: 'short', 
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 </script>
+
+<style scoped>
+.notes-section {
+  margin-top: 16px;
+}
+
+.notes-placeholder {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  border: 1px dashed var(--border-color);
+}
+
+.add-row-btn {
+    width: 100%;
+    padding: 10px;
+    border: 2px dashed var(--border-color);
+    background: white;
+    color: var(--text-secondary);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    text-decoration: none; /* 移除 NuxtLink 的下划线 */
+}
+
+.add-row-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: rgba(24, 144, 255, 0.05);
+}
+
+.note-link-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px; /* 为笔记列表添加最大高度和滚动 */
+  overflow-y: auto;
+  padding-right: 4px; /* 为滚动条留出空间 */
+}
+
+.note-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+.note-link:hover {
+  border-color: var(--primary-color);
+  background: #e6f7ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.note-link-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 12px;
+}
+
+.note-link-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+</style>

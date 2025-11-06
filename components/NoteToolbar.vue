@@ -28,6 +28,9 @@
       <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2m-9 14l-5-5l1.41-1.41L10 14.17l7.59-7.59L19 8z"></path></svg>
     </button>
     
+    <button @click="setLink" :class="{ 'is-active': editor.isActive('link') }" title="添加链接">
+      <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M10.59 13.41c.41.39.41 1.03 0 1.42c-.39.39-1.03.39-1.42 0l-1.83-1.83c-1.17-1.17-1.17-3.07 0-4.24l1.83-1.83c.39-.39 1.03-.39 1.42 0c.41.39.41 1.03 0 1.42L9.34 9.17c-.39.39-.39 1.03 0 1.42zm2.82-4.24c.39-.39 1.03-.39 1.42 0l1.83 1.83c1.17 1.17 1.17 3.07 0 4.24l-1.83 1.83c-.39.39-1.03.39-1.42 0c-.41-.39-.41-1.03 0-1.42l1.17-1.17c.39-.39.39-1.03 0-1.42l-1.17-1.17zM17 7H7a1 1 0 1 0 0 2h10a1 1 0 1 0 0-2m0 8H7a1 1 0 1 0 0 2h10a1 1 0 1 0 0-2"></path></svg>
+    </button>
     <button @click="editor.chain().focus().setHorizontalRule().run()" title="分割线">
       <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M19 13H5v-2h14z"></path></svg>
     </button>
@@ -43,13 +46,41 @@
 </template>
 
 <script setup>
-defineProps({
+// --- *** START: 新增 setLink 函数 *** ---
+const props = defineProps({
   editor: {
     type: Object,
     required: true,
   },
 });
 defineEmits(['toggleMediaMenu', 'insertDateTime']);
+
+function setLink() {
+  // 如果当前已选中链接，则先取消链接
+  if (props.editor.isActive('link')) {
+    props.editor.chain().focus().unsetLink().run();
+    return;
+  }
+
+  // 弹出提示框，要求用户输入 URL
+  const previousUrl = props.editor.getAttributes('link').href;
+  const url = window.prompt('请输入 URL (留空则取消链接)', previousUrl || 'https://');
+
+  // 如果用户点击 "取消"
+  if (url === null) {
+    return;
+  }
+
+  // 如果用户清空了 URL
+  if (url === '') {
+    props.editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    return;
+  }
+
+  // 设置/更新链接
+  props.editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+}
+// --- *** END: 新增 setLink 函数 *** ---
 </script>
 
 <style scoped>
@@ -68,44 +99,37 @@ defineEmits(['toggleMediaMenu', 'insertDateTime']);
   top: auto;
   left: 0;
   right: 0;
-  width: 100%; /* 默认全宽 */
+  width: 100%;
   border-top: 1px solid #444;
   border-bottom: none;
-  padding: 8px 16px; /* 增加左右内边距 */
-  box-sizing: border-box; /* 确保 padding 不会撑开宽度 */
+  padding: 8px 16px; 
+  box-sizing: border-box;
 }
 
 /* 桌面端 (宽屏) 或 平板横屏 样式 */
 @media (min-width: 769px), (orientation: landscape) {
   .note-toolbar {
     bottom: auto;
-    top: 57px; /* 固定在 Header(57px) 下方 */
+    top: 57px; 
     border-top: none;
     border-bottom: 1px solid #444;
-
-    /* 修复：匹配页面居中布局 */
-    margin: 0 auto; /* 居中 */
+    max-width: 800px;
+    margin: 0 auto;
     left: 0; 
     right: 0;
-    
-    /* 修复：与 wrapper 边框对齐 */
     border-left: 1px solid #333;
     border-right: 1px solid #333;
     border-radius: 0;
-    
-    /* 修复：与 editor-content-area 的 padding 对齐 */
     padding: 8px 48px;
   }
 }
 
-/* 修复：在小于800px的屏幕上，桌面端工具栏不应该有边框 */
 @media (max-width: 800px) {
    .note-toolbar {
      border-left: none;
      border-right: none;
    }
 }
-
 
 button {
   background: transparent;

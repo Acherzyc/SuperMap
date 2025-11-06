@@ -54,6 +54,7 @@
         <h3>未找到匹配的要素</h3>
         <p>尝试修改筛选或搜索条件</p>
       </div>
+
       <DataItem
         v-for="feature in orderedFeatures"
         :key="feature.id"
@@ -62,13 +63,16 @@
         :is-highlighted="isHighlighted(feature.id)"
         :is-expanded="feature.id === selectedFeatureId && (!multiSelectedIds || multiSelectedIds.length === 0)"
         :readonly="readonly"
+        
+        :current-project-id="currentProjectId"
+        :notes-list="feature.id === selectedFeatureId ? featureNotes : []" 
         @select-feature="$emit('featureSelected', feature.id)"
         @delete-feature="$emit('featureDeleted', feature.id)"
         @zoom-to-feature="$emit('zoomToFeature', feature.id)"
         @update-style="(styleUpdates) => $emit('updateFeatureStyle', { featureId: feature.id, styleUpdates })"
         @save-properties="(payload) => $emit('saveFeatureProperties', { featureId: feature.id, ...payload })"
       />
-    </div>
+      </div>
   </div>
 </template>
 
@@ -76,6 +80,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import DataItem from './DataItem.vue';
 
+// --- *** 步骤 5 修改: 接收新 Props *** ---
 const props = defineProps({
   features: Array,
   selectedFeatureId: String,
@@ -88,8 +93,16 @@ const props = defineProps({
   readonly: {
     type: Boolean,
     default: false
+  },
+  // --- 新增 ---
+  currentProjectId: [String, Number], // 从 index.vue 传入
+  featureNotes: {                  // 从 index.vue 传入
+    type: Array,
+    default: () => []
   }
+  // --- 结束新增 ---
 });
+// --- *** 结束修改 *** ---
 
 const emit = defineEmits([
   'toggleDesktopPanel', 'closeMobilePanel', 'featureSelected', 'featureDeleted',
@@ -142,6 +155,7 @@ const orderedFeatures = computed(() => {
   return items;
 });
 
+// (移动端拖拽逻辑保持不变)
 const isDragging = ref(false);
 const startY = ref(0);
 const startHeight = ref(0);
@@ -188,6 +202,7 @@ function handleTouchEnd() {
 </script>
 
 <style scoped>
+/* (此文件的 <style> 块无需更改) */
 .batch-actions {
     margin-top: 16px;
     padding-top: 16px;

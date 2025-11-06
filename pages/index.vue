@@ -42,6 +42,8 @@
         :multi-selected-ids="multiSelectedIds"
         :is-panel-collapsed="isDesktopPanelCollapsed"
         :is-mobile-panel-open="isMobilePanelOpen"
+        :current-project-id="currentProjectId"
+        :feature-notes="featureNotes"
         @toggle-desktop-panel="toggleDesktopPanel"
         @close-mobile-panel="closeMobilePanel"
         @feature-selected="selectFeatureById"
@@ -53,7 +55,6 @@
         @update-feature-style="updateFeatureStyle"
         @save-feature-properties="saveFeatureProperties"
       />
-
       <div class="coordinates">经度: <span>{{ mouseCoords.lng }}</span> | 纬度: <span>{{ mouseCoords.lat }}</span></div>
       <div class="draw-tip" v-show="drawTipText">{{ drawTipText }}</div>
     </div>
@@ -89,8 +90,8 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import DrawingToolbar from '~/components/DrawingToolbar.vue';
 import CloudSyncPanel from '~/components/CloudSyncPanel.vue';
-import BatchStyleEditor from '~/components/BatchStyleEditor.vue'; // ADDED
-import BatchPropsEditor from '~/components/BatchPropsEditor.vue'; // ADDED
+import BatchStyleEditor from '~/components/BatchStyleEditor.vue';
+import BatchPropsEditor from '~/components/BatchPropsEditor.vue';
 import { useSupabaseClient, useSupabaseUser } from '#imports';
 /* global AMap, XLSX, html2canvas */
 
@@ -103,6 +104,13 @@ const currentTool = ref('select');
 const isLoading = ref(false);
 const toast = reactive({ message: '', type: 'info', visible: false });
 const mouseCoords = reactive({ lng: '--', lat: '--' });
+
+// --- *** 步骤 4 新增 *** ---
+// 跟踪当前加载的云项目ID
+const currentProjectId = ref(null);
+// 跟踪当前选中要素的笔记列表
+const featureNotes = ref([]);
+// --- *** 结束新增 *** ---
 
 // Drawing state
 const isDrawing = ref(false);
@@ -589,9 +597,14 @@ function closeCurrentEditor() {
     });
 }
 
-function selectFeatureById(featureId) {
+// --- *** 步骤 4 修改 *** ---
+// 1. 将函数设为 async
+async function selectFeatureById(featureId) {
     closeCurrentEditor();
     multiSelectedIds.value = [];
+    
+    // 2. 在任何选择更改时清除旧的笔记列表
+    featureNotes.value = [];
 
     if (!featureId || selectedFeature.value?.id === featureId) {
         selectedFeature.value = null;
@@ -603,6 +616,26 @@ function selectFeatureById(featureId) {
     selectedFeature.value = feature;
 
     if (feature) {
+        // 3. (新增) 获取此要素关联的笔记
+        if (currentProjectId.value && user.value) {
+          try {
+            const { data, error } = await supabase
+              .from('notes')
+              .select('id, note_title, updated_at') // 仅选择列表需要的数据
+              .eq('user_id', user.value.id)
+              .eq('project_id', currentProjectId.value)
+              .eq('feature_id', feature.id)
+              .order('updated_at', { ascending: false }); // 按最新排序
+            
+            if (error) throw error;
+            featureNotes.value = data || []; // 存储查询到的笔记
+          } catch (error) {
+            console.error("加载笔记列表失败:", error);
+            showToast('加载笔记列表失败', 'error');
+          }
+        }
+        // --- 结束 (新增) ---
+
         if (feature.type === 'point') {
             feature.graphic.setDraggable(true);
             feature.graphic.on('dragend', (e) => {
@@ -624,6 +657,7 @@ function selectFeatureById(featureId) {
     if (window.innerWidth <= 768) openMobilePanel();
     if (isDesktopPanelCollapsed.value) isDesktopPanelCollapsed.value = false;
 }
+// --- *** 结束修改 *** ---
 
 function updateAllFeatureStyles() {
     const selectedIds = new Set(multiSelectedIds.value);
@@ -648,6 +682,10 @@ function updateAllFeatureStyles() {
 
 function deleteFeature(featureId) {
     if (!confirm('确定要删除这个要素吗？')) return;
+    // !!! 注意：我们还需要在此处删除所有关联的笔记
+    // (为简单起见，暂时只删除要素，笔记会保留在数据库中变为“孤儿”笔记)
+    // (更完整的实现需要在此处调用 supabase.from('notes').delete()...)
+    
     const index = features.value.findIndex(f => f.id === featureId);
     if (index === -1) return;
 
@@ -715,6 +753,13 @@ function clearAll() {
         features.value = [];
         selectedFeature.value = null;
         multiSelectedIds.value = [];
+        
+        // --- *** 步骤 4 修改 *** ---
+        // 清除地图时，也清除项目和笔记状态
+        currentProjectId.value = null;
+        featureNotes.value = [];
+        // --- *** 结束修改 *** ---
+        
         closeMobilePanel();
         showToast('已清除所有要素', 'success');
     }
@@ -743,12 +788,10 @@ function saveFeatureProperties({ featureId, properties, labelFields }) {
     showToast('属性保存成功', 'success');
 }
 
-// ADDED: Handlers for batch updates
 function handleBatchUpdateStyles(styleUpdates) {
     multiSelectedIds.value.forEach(id => {
         const feature = features.value.find(f => f.id === id);
         if (feature) {
-            // Merge new styles, but filter out undefined properties from the payload
             const updates = Object.fromEntries(Object.entries(styleUpdates).filter(([, value]) => value !== undefined));
             Object.assign(feature.style, updates);
         }
@@ -766,7 +809,6 @@ function handleBatchUpdateProperties({ action, key, value }) {
             } else if (action === 'delete') {
                 delete feature.properties[key];
             }
-            // Update label if the changed property was part of it
             if (feature.style.labelFields?.includes(key)) {
                 if (feature.type === 'point') {
                     feature.graphic.setContent(createMarkerContent(feature));
@@ -780,20 +822,44 @@ function handleBatchUpdateProperties({ action, key, value }) {
 }
 
 
+// --- *** 步骤 4 修改 *** ---
 async function handleSaveProject(payload) {
   if (!user.value) return showToast('请先登录', 'error');
   const serializableFeatures = features.value.map(({ graphic, ...rest }) => rest);
   const projectData = { user_id: user.value.id, project_name: payload.name, map_data: serializableFeatures };
 
   try {
-    const query = payload.id 
-      ? supabase.from('projects').update({ map_data: projectData.map_data, project_name: projectData.project_name }).eq('id', payload.id)
-      : supabase.from('projects').insert(projectData);
-    
-    const { error } = await query;
+    let projectId = payload.id;
+    let error;
+
+    if (payload.id) {
+      // 1. 更新现有项目
+      const { error: updateError } = await supabase
+        .from('projects')
+        .update({ map_data: projectData.map_data, project_name: projectData.project_name })
+        .eq('id', payload.id);
+      error = updateError;
+    } else {
+      // 2. 插入新项目，并取回新 ID
+      const { data, error: insertError } = await supabase
+        .from('projects')
+        .insert(projectData)
+        .select('id') // <-- 关键：获取新 ID
+        .single();
+      error = insertError;
+      if (data) {
+        projectId = data.id; // <-- 关键：存储新 ID
+      }
+    }
+
     if (error) throw error;
+
+    // 3. 将项目ID存入本地状态
+    currentProjectId.value = projectId;
+
     showToast(`项目 "${payload.name}" 保存成功！`, 'success');
     cloudPanelRef.value?.onSaveComplete();
+    
   } catch (error) {
     showToast(`保存失败: ${error.message}`, 'error');
     cloudPanelRef.value?.onSaveComplete();
@@ -803,16 +869,24 @@ async function handleSaveProject(payload) {
 async function handleLoadProject(projectId) {
   isLoading.value = true;
   isCloudPanelVisible.value = false;
+  
+  // 4. 在加载前清除所有旧状态
+  selectedFeature.value = null;
+  multiSelectedIds.value = [];
+  featureNotes.value = [];
+  currentProjectId.value = null; // 清除旧ID
+
   try {
     const { data, error } = await supabase.from('projects').select('map_data').eq('id', projectId).single();
     if (error) throw error;
+
+    // 5. 成功加载后，设置新ID
+    currentProjectId.value = projectId;
 
     drawingLayer.clearOverlays();
     labelMarkers.forEach(marker => map.value.remove(marker));
     labelMarkers.clear();
     features.value = [];
-    selectedFeature.value = null;
-    multiSelectedIds.value = [];
 
     const parsedFeatures = data.map_data || [];
     if (Array.isArray(parsedFeatures) && parsedFeatures.length > 0) {
@@ -824,10 +898,12 @@ async function handleLoadProject(projectId) {
     }
   } catch (error) {
     showToast(`加载项目失败: ${error.message}`, 'error');
+    currentProjectId.value = null; // 加载失败，清除ID
   } finally {
     isLoading.value = false;
   }
 }
+// --- *** 结束修改 *** ---
 
 function handleFileImport(event) {
     const file = event.target.files[0];
@@ -983,6 +1059,11 @@ function closeMobilePanel() {
   closeCurrentEditor();
   selectedFeature.value = null; 
   multiSelectedIds.value = [];
+  
+  // --- *** 步骤 4 修改 *** ---
+  // 关闭移动面板时，也清除笔记
+  featureNotes.value = [];
+  // --- *** 结束修改 *** ---
 }
 
 function showToast(message, type = 'info') {
