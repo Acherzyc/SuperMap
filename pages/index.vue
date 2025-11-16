@@ -227,10 +227,8 @@ function initMap() {
         map.value.add([drawingLayer, searchOverlayGroup]);
 
         satelliteLayer = new AMap.TileLayer.Satellite();
-        roadNetLayer = new AMap.TileLayer.RoadNet();
         map.value.add([satelliteLayer, roadNetLayer]);
         satelliteLayer.hide();
-        roadNetLayer.hide();
         
         AMap.plugin(['AMap.Scale', 'AMap.RangingTool', 'AMap.PolyEditor', 'AMap.MouseTool'], () => {
           map.value.addControl(new AMap.Scale());
