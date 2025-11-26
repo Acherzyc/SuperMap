@@ -139,7 +139,7 @@ let mouseTool = null;
 
 // Map Layers
 let satelliteLayer = null;
-let roadNetLayer = null;
+// let roadNetLayer = null;
 const customMapStyle = 'amap://styles/1b8bbb3ab585491ce8bee8fd90f016f9';
 
 // Supabase and cloud sync panel state
@@ -227,7 +227,7 @@ function initMap() {
         map.value.add([drawingLayer, searchOverlayGroup]);
 
         satelliteLayer = new AMap.TileLayer.Satellite();
-        map.value.add([satelliteLayer, roadNetLayer]);
+        map.value.add([satelliteLayer]);
         satelliteLayer.hide();
         
         AMap.plugin(['AMap.Scale', 'AMap.RangingTool', 'AMap.PolyEditor', 'AMap.MouseTool'], () => {
@@ -680,9 +680,7 @@ function updateAllFeatureStyles() {
 
 function deleteFeature(featureId) {
     if (!confirm('确定要删除这个要素吗？')) return;
-    // !!! 注意：我们还需要在此处删除所有关联的笔记
-    // (为简单起见，暂时只删除要素，笔记会保留在数据库中变为“孤儿”笔记)
-    // (更完整的实现需要在此处调用 supabase.from('notes').delete()...)
+
     
     const index = features.value.findIndex(f => f.id === featureId);
     if (index === -1) return;
@@ -1084,15 +1082,15 @@ function toggleLabels() {
 }
 
 function toggleMapStyle() {
-    if (!map.value || !satelliteLayer || !roadNetLayer) return;
+    if (!map.value || !satelliteLayer) return;
     isSatelliteVisible.value = !isSatelliteVisible.value;
     if (isSatelliteVisible.value) {
         satelliteLayer.show();
-        roadNetLayer.show();
+        // roadNetLayer.show();
         showToast('已切换为卫星影像', 'success');
     } else {
         satelliteLayer.hide();
-        roadNetLayer.hide();
+        // roadNetLayer.hide();
         showToast('已切换为标准地图', 'success');
     }
 }
